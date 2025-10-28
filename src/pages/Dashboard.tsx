@@ -1,27 +1,99 @@
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { FileText, Video, TrendingUp, Clock } from "lucide-react";
-import Navbar from "@/components/Navbar";
+import AuthenticatedNavbar from "@/components/AuthenticatedNavbar";
 import Footer from "@/components/Footer";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "react-router-dom";
+import ProtectedRoute from "@/components/ProtectedRoute";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
-const Dashboard = () => {
-  const recentResumes = [
-    { name: "Software Engineer Resume", date: "2 days ago", score: 85 },
-    { name: "Product Manager Resume", date: "1 week ago", score: 78 },
-    { name: "Data Analyst Resume", date: "2 weeks ago", score: 92 }
-  ];
+const DashboardContent = () => {
+  const [resumes, setResumes] = useState<any[]>([]);
+  const [interviews, setInterviews] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({
+    totalResumes: 0,
+    totalInterviews: 0,
+    avgScore: 0,
+  });
 
-  const recentInterviews = [
-    { role: "Senior Developer", date: "3 days ago", questions: 8, score: 82 },
-    { role: "Frontend Engineer", date: "1 week ago", questions: 10, score: 75 },
-    { role: "Tech Lead", date: "2 weeks ago", questions: 12, score: 88 }
-  ];
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    try {
+      // Fetch resumes
+      const { data: resumesData, error: resumesError } = await supabase
+        .from("resumes")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(3);
+
+      if (resumesError) throw resumesError;
+
+      // Fetch interviews
+      const { data: interviewsData, error: interviewsError } = await supabase
+        .from("interviews")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(3);
+
+      if (interviewsError) throw interviewsError;
+
+      setResumes(resumesData || []);
+      setInterviews(interviewsData || []);
+
+      // Calculate stats
+      const totalResumes = resumesData?.length || 0;
+      const totalInterviews = interviewsData?.length || 0;
+      const avgScore = resumesData && resumesData.length > 0
+        ? Math.round(
+            resumesData
+              .filter((r) => r.ats_score)
+              .reduce((acc, r) => acc + (r.ats_score || 0), 0) / resumesData.length
+          )
+        : 0;
+
+      setStats({ totalResumes, totalInterviews, avgScore });
+    } catch (error: any) {
+      console.error("Error fetching dashboard data:", error);
+      toast.error("Failed to load dashboard data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - date.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) return "Today";
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays < 7) return `${diffDays} days ago`;
+    if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
+    return date.toLocaleDateString();
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <AuthenticatedNavbar />
+        <div className="pt-24 pb-12 flex items-center justify-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
-      <Navbar />
+      <AuthenticatedNavbar />
       
       <div className="pt-24 pb-12">
         <div className="container mx-auto px-4">
@@ -46,7 +118,7 @@ const Dashboard = () => {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">Resumes Created</p>
-                      <p className="text-3xl font-bold mt-1">12</p>
+                      <p className="text-3xl font-bold mt-1">{stats.totalResumes}</p>
                     </div>
                     <div className="w-12 h-12 rounded-full bg-gradient-card flex items-center justify-center">
                       <FileText className="w-6 h-6 text-primary" />
@@ -60,7 +132,7 @@ const Dashboard = () => {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">Mock Interviews</p>
-                      <p className="text-3xl font-bold mt-1">8</p>
+                      <p className="text-3xl font-bold mt-1">{stats.totalInterviews}</p>
                     </div>
                     <div className="w-12 h-12 rounded-full bg-gradient-card flex items-center justify-center">
                       <Video className="w-6 h-6 text-accent" />
@@ -74,7 +146,7 @@ const Dashboard = () => {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">Avg ATS Score</p>
-                      <p className="text-3xl font-bold mt-1">85%</p>
+                      <p className="text-3xl font-bold mt-1">{stats.avgScore}%</p>
                     </div>
                     <div className="w-12 h-12 rounded-full bg-gradient-card flex items-center justify-center">
                       <TrendingUp className="w-6 h-6 text-primary" />
@@ -99,30 +171,39 @@ const Dashboard = () => {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    {recentResumes.map((resume, idx) => (
-                      <div 
-                        key={idx}
-                        className="flex items-center justify-between p-4 rounded-lg border border-border hover:border-primary/50 transition-all cursor-pointer"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-lg bg-gradient-card flex items-center justify-center">
-                            <FileText className="w-5 h-5 text-primary" />
+                  {resumes.length > 0 ? (
+                    <div className="space-y-4">
+                      {resumes.map((resume) => (
+                        <div 
+                          key={resume.id}
+                          className="flex items-center justify-between p-4 rounded-lg border border-border hover:border-primary/50 transition-all cursor-pointer"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-lg bg-gradient-card flex items-center justify-center">
+                              <FileText className="w-5 h-5 text-primary" />
+                            </div>
+                            <div>
+                              <p className="font-medium">{resume.title}</p>
+                              <p className="text-sm text-muted-foreground flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                {formatDate(resume.created_at)}
+                              </p>
+                            </div>
                           </div>
-                          <div>
-                            <p className="font-medium">{resume.name}</p>
-                            <p className="text-sm text-muted-foreground flex items-center gap-1">
-                              <Clock className="w-3 h-3" />
-                              {resume.date}
-                            </p>
-                          </div>
+                          {resume.ats_score && (
+                            <Badge className="bg-gradient-primary text-primary-foreground">
+                              {resume.ats_score}%
+                            </Badge>
+                          )}
                         </div>
-                        <Badge className="bg-gradient-primary text-primary-foreground">
-                          {resume.score}%
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <FileText className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                      <p>No resumes yet. Create your first one!</p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -139,29 +220,38 @@ const Dashboard = () => {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    {recentInterviews.map((interview, idx) => (
-                      <div 
-                        key={idx}
-                        className="flex items-center justify-between p-4 rounded-lg border border-border hover:border-primary/50 transition-all cursor-pointer"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-lg bg-gradient-card flex items-center justify-center">
-                            <Video className="w-5 h-5 text-accent" />
+                  {interviews.length > 0 ? (
+                    <div className="space-y-4">
+                      {interviews.map((interview) => (
+                        <div 
+                          key={interview.id}
+                          className="flex items-center justify-between p-4 rounded-lg border border-border hover:border-primary/50 transition-all cursor-pointer"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-lg bg-gradient-card flex items-center justify-center">
+                              <Video className="w-5 h-5 text-accent" />
+                            </div>
+                            <div>
+                              <p className="font-medium">{interview.role}</p>
+                              <p className="text-sm text-muted-foreground">
+                                {interview.industry} • {formatDate(interview.created_at)}
+                              </p>
+                            </div>
                           </div>
-                          <div>
-                            <p className="font-medium">{interview.role}</p>
-                            <p className="text-sm text-muted-foreground">
-                              {interview.questions} questions • {interview.date}
-                            </p>
-                          </div>
+                          {interview.overall_score && (
+                            <Badge variant="secondary">
+                              {interview.overall_score}%
+                            </Badge>
+                          )}
                         </div>
-                        <Badge variant="secondary">
-                          {interview.score}%
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Video className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                      <p>No interviews yet. Start practicing!</p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -197,6 +287,14 @@ const Dashboard = () => {
 
       <Footer />
     </div>
+  );
+};
+
+const Dashboard = () => {
+  return (
+    <ProtectedRoute>
+      <DashboardContent />
+    </ProtectedRoute>
   );
 };
 
