@@ -76,12 +76,12 @@ const Home = () => {
             </p>
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-              <Link to="/resume-builder">
+              <Link to="/auth">
                 <Button size="lg" className="bg-gradient-primary hover:opacity-90 text-lg px-8">
                   Build Your Resume
                 </Button>
               </Link>
-              <Link to="/mock-interview">
+              <Link to="/auth">
                 <Button size="lg" variant="outline" className="text-lg px-8">
                   Practice Interview
                 </Button>
@@ -132,7 +132,7 @@ const Home = () => {
                 Join thousands of job seekers who have improved their applications with AI-powered tools
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <Link to="/resume-builder">
+                <Link to="/auth">
                   <Button size="lg" className="bg-gradient-primary hover:opacity-90">
                     Get Started Free
                   </Button>

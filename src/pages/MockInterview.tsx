@@ -1,30 +1,180 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Mic, Video, Play, RotateCcw, Sparkles } from "lucide-react";
-import Navbar from "@/components/Navbar";
+import { Mic, RotateCcw, Sparkles, Loader2, CheckCircle } from "lucide-react";
+import AuthenticatedNavbar from "@/components/AuthenticatedNavbar";
 import Footer from "@/components/Footer";
 import { Badge } from "@/components/ui/badge";
+import ProtectedRoute from "@/components/ProtectedRoute";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { Progress } from "@/components/ui/progress";
 
-const MockInterview = () => {
+const MockInterviewContent = () => {
   const [interviewStarted, setInterviewStarted] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState(0);
+  const [loading, setLoading] = useState(false);
   
-  const questions = [
-    "Tell me about yourself and your professional background.",
-    "What are your greatest strengths and how do they apply to this role?",
-    "Describe a challenging project you worked on and how you handled it.",
-    "Where do you see yourself in 5 years?",
-    "Why are you interested in this position?"
-  ];
+  const [role, setRole] = useState("");
+  const [industry, setIndustry] = useState("");
+  const [experienceLevel, setExperienceLevel] = useState("");
+  const [jobDescription, setJobDescription] = useState("");
+  
+  const [interviewId, setInterviewId] = useState<string | null>(null);
+  const [questions, setQuestions] = useState<any[]>([]);
+  const [responses, setResponses] = useState<{ [key: string]: string }>({});
+  const [currentResponse, setCurrentResponse] = useState("");
+  const [feedback, setFeedback] = useState<{ [key: string]: any }>({});
+  const [analyzing, setAnalyzing] = useState(false);
+
+  const handleGenerateQuestions = async () => {
+    if (!role || !industry || !experienceLevel) {
+      toast.error("Please fill in all required fields");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      // Create interview record
+      const { data: interviewData, error: interviewError } = await supabase
+        .from('interviews')
+        .insert([{
+          user_id: user.id,
+          role,
+          industry,
+          experience_level: experienceLevel,
+          job_description: jobDescription,
+          status: 'in_progress'
+        }])
+        .select()
+        .single();
+
+      if (interviewError) throw interviewError;
+
+      setInterviewId(interviewData.id);
+
+      // Generate questions using AI
+      const { data, error } = await supabase.functions.invoke('generate-interview-questions', {
+        body: { role, industry, experienceLevel, jobDescription }
+      });
+
+      if (error) throw error;
+
+      // Save questions to database
+      const questionsToInsert = data.questions.map((q: any, idx: number) => ({
+        interview_id: interviewData.id,
+        question_text: q.text,
+        question_order: idx + 1,
+        category: q.category
+      }));
+
+      const { error: questionsError } = await supabase
+        .from('interview_questions')
+        .insert(questionsToInsert);
+
+      if (questionsError) throw questionsError;
+
+      setQuestions(data.questions);
+      setInterviewStarted(true);
+      toast.success(`Generated ${data.questions.length} questions!`);
+    } catch (error: any) {
+      console.error("Generate questions error:", error);
+      toast.error(error.message || "Failed to generate questions");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmitResponse = async () => {
+    if (!currentResponse.trim()) {
+      toast.error("Please enter your response");
+      return;
+    }
+
+    setAnalyzing(true);
+    try {
+      const currentQ = questions[currentQuestion];
+      
+      // Get AI feedback
+      const { data, error } = await supabase.functions.invoke('analyze-interview-response', {
+        body: {
+          question: currentQ.text,
+          response: currentResponse,
+          category: currentQ.category
+        }
+      });
+
+      if (error) throw error;
+
+      // Save response and feedback
+      setResponses({ ...responses, [currentQuestion]: currentResponse });
+      setFeedback({ ...feedback, [currentQuestion]: data });
+
+      toast.success("Response analyzed!");
+
+      // Move to next question or finish
+      if (currentQuestion < questions.length - 1) {
+        setCurrentQuestion(currentQuestion + 1);
+        setCurrentResponse("");
+      } else {
+        await completeInterview(data.score);
+      }
+    } catch (error: any) {
+      console.error("Analysis error:", error);
+      toast.error(error.message || "Failed to analyze response");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const completeInterview = async (finalScore: number) => {
+    if (!interviewId) return;
+
+    try {
+      // Calculate average score
+      const scores = Object.values(feedback).map((f: any) => f.score);
+      scores.push(finalScore);
+      const avgScore = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+
+      // Update interview status
+      const { error } = await supabase
+        .from('interviews')
+        .update({
+          status: 'completed',
+          overall_score: avgScore
+        })
+        .eq('id', interviewId);
+
+      if (error) throw error;
+
+      toast.success("Interview completed!");
+    } catch (error: any) {
+      console.error("Complete interview error:", error);
+    }
+  };
+
+  const handleSkip = () => {
+    if (currentQuestion < questions.length - 1) {
+      setCurrentQuestion(currentQuestion + 1);
+      setCurrentResponse("");
+    }
+  };
+
+  const getProgress = () => {
+    if (questions.length === 0) return 0;
+    return ((currentQuestion + 1) / questions.length) * 100;
+  };
 
   return (
     <div className="min-h-screen bg-background">
-      <Navbar />
+      <AuthenticatedNavbar />
       
       <div className="pt-24 pb-12">
         <div className="container mx-auto px-4">
@@ -50,13 +200,17 @@ const MockInterview = () => {
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="space-y-2">
-                      <Label>Role/Position</Label>
-                      <Input placeholder="e.g., Senior Software Engineer" />
+                      <Label>Role/Position *</Label>
+                      <Input 
+                        placeholder="e.g., Senior Software Engineer" 
+                        value={role}
+                        onChange={(e) => setRole(e.target.value)}
+                      />
                     </div>
                     
                     <div className="space-y-2">
-                      <Label>Industry</Label>
-                      <Select>
+                      <Label>Industry *</Label>
+                      <Select value={industry} onValueChange={setIndustry}>
                         <SelectTrigger>
                           <SelectValue placeholder="Select industry" />
                         </SelectTrigger>
@@ -65,22 +219,23 @@ const MockInterview = () => {
                           <SelectItem value="finance">Finance</SelectItem>
                           <SelectItem value="healthcare">Healthcare</SelectItem>
                           <SelectItem value="marketing">Marketing</SelectItem>
+                          <SelectItem value="education">Education</SelectItem>
                           <SelectItem value="other">Other</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                     
                     <div className="space-y-2">
-                      <Label>Experience Level</Label>
-                      <Select>
+                      <Label>Experience Level *</Label>
+                      <Select value={experienceLevel} onValueChange={setExperienceLevel}>
                         <SelectTrigger>
                           <SelectValue placeholder="Select experience level" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="entry">Entry Level</SelectItem>
-                          <SelectItem value="mid">Mid Level</SelectItem>
-                          <SelectItem value="senior">Senior Level</SelectItem>
-                          <SelectItem value="lead">Lead/Manager</SelectItem>
+                          <SelectItem value="entry">Entry Level (0-2 years)</SelectItem>
+                          <SelectItem value="mid">Mid Level (3-5 years)</SelectItem>
+                          <SelectItem value="senior">Senior Level (5-10 years)</SelectItem>
+                          <SelectItem value="lead">Lead/Manager (10+ years)</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -90,15 +245,27 @@ const MockInterview = () => {
                       <Textarea 
                         placeholder="Paste the job description to get tailored questions..."
                         className="min-h-[120px]"
+                        value={jobDescription}
+                        onChange={(e) => setJobDescription(e.target.value)}
                       />
                     </div>
                     
                     <Button 
                       className="w-full bg-gradient-primary"
-                      onClick={() => setInterviewStarted(true)}
+                      onClick={handleGenerateQuestions}
+                      disabled={loading || !role || !industry || !experienceLevel}
                     >
-                      <Sparkles className="w-4 h-4 mr-2" />
-                      Generate Questions
+                      {loading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Generating Questions...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4 mr-2" />
+                          Generate Questions
+                        </>
+                      )}
                     </Button>
                   </CardContent>
                 </Card>
@@ -116,7 +283,7 @@ const MockInterview = () => {
                         <div>
                           <h4 className="font-medium">AI-Generated Questions</h4>
                           <p className="text-sm text-muted-foreground">
-                            5-10 questions customized for your role and industry
+                            8-10 questions customized for your role and industry
                           </p>
                         </div>
                       </div>
@@ -126,9 +293,9 @@ const MockInterview = () => {
                           <span className="text-sm font-bold text-primary">2</span>
                         </div>
                         <div>
-                          <h4 className="font-medium">Record Your Answers</h4>
+                          <h4 className="font-medium">Type Your Answers</h4>
                           <p className="text-sm text-muted-foreground">
-                            Practice speaking your responses naturally
+                            Practice formulating clear, structured responses
                           </p>
                         </div>
                       </div>
@@ -150,9 +317,9 @@ const MockInterview = () => {
                           <span className="text-sm font-bold text-primary">4</span>
                         </div>
                         <div>
-                          <h4 className="font-medium">Review & Improve</h4>
+                          <h4 className="font-medium">Track Your Progress</h4>
                           <p className="text-sm text-muted-foreground">
-                            Track your progress and refine your interview skills
+                            See your score and areas for improvement
                           </p>
                         </div>
                       </div>
@@ -160,7 +327,7 @@ const MockInterview = () => {
                     
                     <div className="p-4 bg-gradient-card rounded-lg border border-primary/20">
                       <p className="text-sm">
-                        <strong>Pro Tip:</strong> Enable your microphone and camera for the most realistic practice experience
+                        <strong>Pro Tip:</strong> Use the STAR method (Situation, Task, Action, Result) for behavioral questions
                       </p>
                     </div>
                   </CardContent>
@@ -172,32 +339,77 @@ const MockInterview = () => {
                 <div className="lg:col-span-2 space-y-6">
                   <Card>
                     <CardHeader>
-                      <div className="flex items-center justify-between">
-                        <CardTitle>Question {currentQuestion + 1} of {questions.length}</CardTitle>
-                        <Badge className="bg-gradient-primary text-primary-foreground">In Progress</Badge>
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <CardTitle>Question {currentQuestion + 1} of {questions.length}</CardTitle>
+                          <Badge className="bg-gradient-primary text-primary-foreground">
+                            {questions[currentQuestion]?.category}
+                          </Badge>
+                        </div>
+                        <Progress value={getProgress()} className="h-2" />
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-6">
-                      <div className="aspect-video bg-muted rounded-lg border-2 border-border flex items-center justify-center">
-                        <div className="text-center space-y-4">
-                          <Video className="w-16 h-16 mx-auto text-muted-foreground" />
-                          <p className="text-sm text-muted-foreground">Camera preview will appear here</p>
-                        </div>
-                      </div>
-                      
                       <div className="p-6 bg-gradient-card rounded-lg border border-primary/20">
-                        <p className="text-lg font-medium">{questions[currentQuestion]}</p>
+                        <p className="text-lg font-medium">{questions[currentQuestion]?.text}</p>
                       </div>
                       
-                      <div className="flex gap-3 justify-center">
-                        <Button size="lg" className="bg-gradient-primary">
-                          <Mic className="w-5 h-5 mr-2" />
-                          Start Recording
+                      <div className="space-y-2">
+                        <Label>Your Response</Label>
+                        <Textarea
+                          placeholder="Type your answer here... Use the STAR method for behavioral questions."
+                          className="min-h-[200px]"
+                          value={currentResponse}
+                          onChange={(e) => setCurrentResponse(e.target.value)}
+                        />
+                      </div>
+                      
+                      {feedback[currentQuestion] && (
+                        <div className="p-4 bg-gradient-card rounded-lg border border-primary/20 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h4 className="font-semibold">AI Feedback</h4>
+                            <Badge variant="secondary">Score: {feedback[currentQuestion].score}/100</Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            {feedback[currentQuestion].feedback}
+                          </p>
+                        </div>
+                      )}
+                      
+                      <div className="flex gap-3">
+                        <Button 
+                          size="lg" 
+                          className="bg-gradient-primary flex-1"
+                          onClick={handleSubmitResponse}
+                          disabled={analyzing || !currentResponse.trim()}
+                        >
+                          {analyzing ? (
+                            <>
+                              <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                              Analyzing...
+                            </>
+                          ) : currentQuestion === questions.length - 1 ? (
+                            <>
+                              <CheckCircle className="w-5 h-5 mr-2" />
+                              Finish Interview
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-5 h-5 mr-2" />
+                              Submit & Next
+                            </>
+                          )}
                         </Button>
-                        <Button size="lg" variant="outline">
-                          <RotateCcw className="w-5 h-5 mr-2" />
-                          Skip
-                        </Button>
+                        {currentQuestion < questions.length - 1 && (
+                          <Button 
+                            size="lg" 
+                            variant="outline"
+                            onClick={handleSkip}
+                          >
+                            <RotateCcw className="w-5 h-5 mr-2" />
+                            Skip
+                          </Button>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
@@ -216,11 +428,18 @@ const MockInterview = () => {
                             className={`p-3 rounded-lg border cursor-pointer transition-all ${
                               idx === currentQuestion 
                                 ? "border-primary bg-gradient-card" 
+                                : responses[idx]
+                                ? "border-green-500/50 bg-green-500/10"
                                 : "border-border hover:border-primary/50"
                             }`}
                             onClick={() => setCurrentQuestion(idx)}
                           >
-                            <p className="text-sm font-medium">Q{idx + 1}</p>
+                            <div className="flex items-center justify-between">
+                              <p className="text-sm font-medium">Q{idx + 1}</p>
+                              {responses[idx] && (
+                                <CheckCircle className="w-4 h-4 text-green-500" />
+                              )}
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -229,15 +448,21 @@ const MockInterview = () => {
                   
                   <Card>
                     <CardHeader>
-                      <CardTitle>Controls</CardTitle>
+                      <CardTitle>Interview Info</CardTitle>
                     </CardHeader>
-                    <CardContent className="space-y-3">
-                      <Button className="w-full" variant="outline">
-                        Pause Interview
-                      </Button>
-                      <Button className="w-full" variant="destructive">
-                        End Interview
-                      </Button>
+                    <CardContent className="space-y-2 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">Role:</span>
+                        <p className="font-medium">{role}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Industry:</span>
+                        <p className="font-medium capitalize">{industry}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Level:</span>
+                        <p className="font-medium capitalize">{experienceLevel}</p>
+                      </div>
                     </CardContent>
                   </Card>
                 </div>
@@ -249,6 +474,14 @@ const MockInterview = () => {
 
       <Footer />
     </div>
+  );
+};
+
+const MockInterview = () => {
+  return (
+    <ProtectedRoute>
+      <MockInterviewContent />
+    </ProtectedRoute>
   );
 };
 
