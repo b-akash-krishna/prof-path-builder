@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Supabase Configuration File
 
 project_id = "yjyptluxhubjmbbakdld"
@@ -25,6 +26,10 @@ enable_confirmations = false
 enabled = true
 file_size_limit = "5MB"
 
+=======
+project_id = "yjyptluxhubjmbbakdld"
+
+>>>>>>> 801a78b4be3b2ddaf9b88c0f194248ff0db89c44
 [functions.analyze-resume]
 verify_jwt = true
 
