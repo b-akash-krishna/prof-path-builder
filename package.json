@@ -1,14 +1,17 @@
 {
-  "name": "vite_react_shadcn_ts",
+  "name": "careerai",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "tsc && vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "db:push": "supabase db push",
+    "db:reset": "supabase db reset",
+    "deploy:supabase": "supabase functions deploy analyze-resume && supabase functions deploy optimize-resume && supabase functions deploy generate-interview-questions && supabase functions deploy analyze-interview-response"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

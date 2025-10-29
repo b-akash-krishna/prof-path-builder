@@ -1,32 +1,77 @@
-name: Deploy to AWS EC2
+name: Deploy to Vercel and Supabase
 
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
-  deploy:
+  # Deploy Supabase Edge Functions
+  deploy-supabase:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
+          version: latest
       
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
-      
-      - name: Build and push Docker images
+      - name: Deploy Edge Functions
         run: |
-          docker-compose -f infra/docker/docker-compose.prod.yml build
-          docker-compose -f infra/docker/docker-compose.prod.yml push
+          supabase functions deploy analyze-resume --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+          supabase functions deploy optimize-resume --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+          supabase functions deploy generate-interview-questions --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+          supabase functions deploy analyze-interview-response --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+  # Deploy Frontend to Vercel
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    needs: deploy-supabase
+    steps:
+      - uses: actions/checkout@v3
       
-      - name: Deploy to EC2
-        run: |
-          ssh -i ${{ secrets.EC2_SSH_KEY }} ubuntu@${{ secrets.EC2_HOST }} \
-            'cd /app && docker-compose pull && docker-compose up -d'
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+      
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+      
+      - name: Pull Vercel Environment Information
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+      
+      - name: Build Project Artifacts
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+      
+      - name: Deploy Project Artifacts to Vercel
+        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+  # Run Tests
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+      
+      - name: Install dependencies
+        run: npm install
+      
+      - name: Run linter
+        run: npm run lint || true
+      
+      - name: Build project
+        run: npm run build
